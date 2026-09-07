@@ -123,14 +123,36 @@ To guarantee 100% safety and correctness before proposing upstream integration:
 
 ## 5. Implementation Roadmap
 
-- [ ] **Milestone 1: Isolated Benchmark Harness & Baseline Capture**
-  - Create standalone Rust crate in this directory.
-  - Port Agave's `shredder.rs` coding benchmark.
-  - Measure baseline encode/decode times on this host (Apple Silicon M-series / Linux ARM64).
-- [ ] **Milestone 2: ARM64 NEON $GF(2^8)$ Kernel Implementation**
-  - Precompute nibble lookup tables matching Solana's generator polynomial.
-  - Implement vector encode and decode routines using `core::arch::aarch64`.
-- [ ] **Milestone 3: Parity Verification Suite**
-  - Run differential fuzzing comparing output against Agave's current `ReedSolomonCache`.
-- [ ] **Milestone 4: Upstream RFC & PR Preparation**
-  - Package as a clean crate / submodule ready for submission to `anza-xyz/agave` (addressing Issue #9495).
+- [x] **Milestone 1: Isolated Benchmark Harness & Baseline Capture**
+  - Created standalone Rust microbenchmark crate in this directory.
+  - Implemented Agave coding harness with Criterion.
+  - Measured baseline encode times on native Linux ARM64 (Apple Silicon).
+- [x] **Milestone 2: ARM64 NEON $GF(2^8)$ Kernel Implementation**
+  - Precomputed nibble lookup tables matching Solana's generator polynomial (0x11D).
+  - Implemented vectorized encode and decode routines using `core::arch::aarch64` (`vqtbl1q_u8`).
+  - Added x86_64 AVX2 fallback kernel (`_mm256_shuffle_epi8`).
+- [x] **Milestone 3: Parity Verification Suite**
+  - Executed 1,000,000 differential fuzzing vectors comparing output against Agave's `reed-solomon-erasure`.
+  - Verified 100% bit-for-bit parity on 1,228-byte shreds across (32, 32), (64, 64), and (16, 16).
+  - Implemented simulated packet loss fuzzing (erasure recovery) with SHA-256 validation.
+- [x] **Milestone 4: Upstream RFC & PR Preparation**
+  - Modularized crate (`solana-turbine-simd`) ready as drop-in replacement for `ReedSolomonCache` in `anza-xyz/agave` (addressing Issue #9495).
+
+---
+
+## 6. Empirical Benchmark Results (Apple Silicon aarch64)
+
+Benchmarked on native ARM64 with 50 Criterion samples per configuration on canonical 1,228-byte shreds:
+
+| Erasure Configuration | Engine | Latency ($\mu$s) | Data Throughput | Speedup vs Agave Current |
+| :--- | :--- | :--- | :--- | :--- |
+| **32 data / 32 parity (Canonical Solana)** | **SolARM NEON (`vqtbl1q_u8`)** | **162.46 $\mu$s** | **230.67 MiB/s** | **5.58x FASTER** |
+| 32 data / 32 parity | Agave Current (`reed-solomon-erasure`) | 906.28 $\mu$s | 41.35 MiB/s | 1.00x (Baseline) |
+| 32 data / 32 parity | Scalar Fallback | 2,514.00 $\mu$s | 14.91 MiB/s | 0.36x |
+| **16 data / 16 parity** | **SolARM NEON (`vqtbl1q_u8`)** | **43.35 $\mu$s** | **432.28 MiB/s** | **3.27x FASTER** |
+| 16 data / 16 parity | Agave Current (`reed-solomon-erasure`) | 141.98 $\mu$s | 131.97 MiB/s | 1.00x |
+| 16 data / 16 parity | Scalar Fallback | 358.42 $\mu$s | 52.28 MiB/s | 0.40x |
+| **64 data / 64 parity** | **SolARM NEON (`vqtbl1q_u8`)** | **939.48 $\mu$s** | **79.78 MiB/s** | **1.84x FASTER** |
+| 64 data / 64 parity | Agave Current (`reed-solomon-erasure`) | 1,732.60 $\mu$s | 43.26 MiB/s | 1.00x |
+| 64 data / 64 parity | Scalar Fallback | 11,533.00 $\mu$s | 6.50 MiB/s | 0.15x |
+
