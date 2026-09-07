@@ -570,6 +570,8 @@ name = "solana-turbine-simd"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "lru",
+ "parking_lot",
  "rand",
  "rand_chacha",
  "reed-solomon-erasure",

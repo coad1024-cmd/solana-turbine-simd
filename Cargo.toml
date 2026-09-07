@@ -8,10 +8,16 @@ reed-solomon-erasure = { version = "6.0.0", features = ["simd-accel"] }
 rand = "0.8"
 rand_chacha = "0.3"
 sha2 = "0.10"
+lru = "0.7"
+parking_lot = "0.11"
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 
 [[bench]]
 name = "shred_encode"
+harness = false
+
+[[bench]]
+name = "shred_recovery"
 harness = false

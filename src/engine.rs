@@ -1,5 +1,9 @@
 //! Wire-compatible Reed-Solomon Erasure Engine with native ARM NEON and AVX2 acceleration.
 
+use std::sync::Arc;
+use parking_lot::Mutex;
+use lru::LruCache;
+
 use crate::galois::{scalar_mul_slice, scalar_mul_slice_xor};
 use crate::matrix::Matrix;
 
@@ -8,6 +12,8 @@ use crate::neon::{neon_encode_parity_shred, neon_mul_slice, neon_mul_slice_xor};
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use crate::avx2::{avx2_mul_slice, avx2_mul_slice_xor};
+
+const DECODE_MATRIX_CACHE_CAPACITY: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
@@ -21,13 +27,29 @@ pub enum Error {
     InvalidIndex,
 }
 
-#[derive(Debug, Clone)]
 pub struct SimdReedSolomon {
     data_shards: usize,
     parity_shards: usize,
     total_shards: usize,
     coding_matrix: Matrix,
     parity_rows: Vec<Vec<u8>>,
+    decode_matrix_cache: Mutex<LruCache<Vec<usize>, Arc<Matrix>>>,
+}
+
+impl std::fmt::Debug for SimdReedSolomon {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimdReedSolomon")
+            .field("data_shards", &self.data_shards)
+            .field("parity_shards", &self.parity_shards)
+            .field("total_shards", &self.total_shards)
+            .finish()
+    }
+}
+
+impl Clone for SimdReedSolomon {
+    fn clone(&self) -> Self {
+        Self::new(self.data_shards, self.parity_shards).expect("Prevalidated parameters")
+    }
 }
 
 impl SimdReedSolomon {
@@ -63,6 +85,7 @@ impl SimdReedSolomon {
             total_shards,
             coding_matrix,
             parity_rows,
+            decode_matrix_cache: Mutex::new(LruCache::new(DECODE_MATRIX_CACHE_CAPACITY)),
         })
     }
 
@@ -216,6 +239,28 @@ impl SimdReedSolomon {
         Ok(())
     }
 
+    /// Retrieves or computes the cached inverted decode matrix for the given available shard indices.
+    pub fn get_decode_matrix(&self, available_indices: &[usize]) -> Result<Arc<Matrix>, Error> {
+        {
+            let mut cache = self.decode_matrix_cache.lock();
+            if let Some(mat) = cache.get(available_indices) {
+                return Ok(mat.clone());
+            }
+        }
+
+        let mut sub_mat = Matrix::new(self.data_shards, self.data_shards);
+        for (r, &src_row) in available_indices.iter().enumerate() {
+            for c in 0..self.data_shards {
+                sub_mat.set(r, c, self.coding_matrix.get(src_row, c));
+            }
+        }
+        let inv_decode_mat = Arc::new(sub_mat.invert().map_err(|_| Error::SingularMatrix)?);
+
+        let mut cache = self.decode_matrix_cache.lock();
+        cache.put(available_indices.to_vec(), inv_decode_mat.clone());
+        Ok(inv_decode_mat)
+    }
+
     /// Reconstructs missing data shards in-place from available data and parity shards.
     pub fn reconstruct_data<T: AsRef<[u8]> + AsMut<[u8]>>(
         &self,
@@ -261,14 +306,8 @@ impl SimdReedSolomon {
             return Err(Error::TooFewShardsPresent);
         }
 
-        // Build decode matrix from the available rows of the coding matrix
-        let mut sub_mat = Matrix::new(self.data_shards, self.data_shards);
-        for (r, &src_row) in available_indices.iter().enumerate() {
-            for c in 0..self.data_shards {
-                sub_mat.set(r, c, self.coding_matrix.get(src_row, c));
-            }
-        }
-        let inv_decode_mat = sub_mat.invert().map_err(|_| Error::SingularMatrix)?;
+        // Fetch or compute decode matrix
+        let inv_decode_mat = self.get_decode_matrix(&available_indices)?;
 
         // Prepare available shard buffers
         let available_shards: Vec<Vec<u8>> = available_indices
@@ -288,7 +327,10 @@ impl SimdReedSolomon {
 
             #[cfg(target_arch = "aarch64")]
             {
-                neon_encode_parity_shred(&row, &avail_refs, out_buf);
+                neon_mul_slice(row[0], avail_refs[0], out_buf);
+                for d in 1..self.data_shards {
+                    neon_mul_slice_xor(row[d], avail_refs[d], out_buf);
+                }
             }
 
             #[cfg(all(any(target_arch = "x86", target_arch = "x86_64"), not(target_arch = "aarch64")))]

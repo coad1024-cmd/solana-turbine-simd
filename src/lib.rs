@@ -14,5 +14,7 @@ pub mod neon;
 pub mod avx2;
 
 pub mod engine;
+pub mod cache;
 
 pub use engine::{Error, SimdReedSolomon};
+pub use cache::ReedSolomonCache;
