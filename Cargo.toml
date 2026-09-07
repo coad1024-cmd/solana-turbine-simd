@@ -1,0 +1,17 @@
+[package]
+name = "solana-turbine-simd"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+reed-solomon-erasure = { version = "6.0.0", features = ["simd-accel"] }
+rand = "0.8"
+rand_chacha = "0.3"
+sha2 = "0.10"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "shred_encode"
+harness = false
