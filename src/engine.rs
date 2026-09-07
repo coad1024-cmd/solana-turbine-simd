@@ -309,12 +309,15 @@ impl SimdReedSolomon {
         // Fetch or compute decode matrix
         let inv_decode_mat = self.get_decode_matrix(&available_indices)?;
 
-        // Prepare available shard buffers
-        let available_shards: Vec<Vec<u8>> = available_indices
+        // Prepare available shard references without heap allocation.
+        // Safety: available_indices and missing_data are strictly disjoint indices,
+        // ensuring shards[missing_idx] and avail_refs never alias.
+        let avail_refs: Vec<&[u8]> = available_indices
             .iter()
-            .map(|&idx| shards[idx].as_ref().to_vec())
+            .map(|&idx| unsafe {
+                std::slice::from_raw_parts(shards[idx].as_ref().as_ptr(), shard_len)
+            })
             .collect();
-        let avail_refs: Vec<&[u8]> = available_shards.iter().map(|v| v.as_slice()).collect();
 
         // For each missing data shard, compute its value from available shards
         for &missing_idx in &missing_data {
