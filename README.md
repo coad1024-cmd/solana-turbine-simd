@@ -19,7 +19,7 @@ Under sustained high-throughput conditions (thousands of shreds per slot, 1,228 
 
 ### The Archaeological Impasse in Agave (#9495):
 1. **The Incompatible Crate Failure:** Previous attempts to adopt `reed-solomon-simd` were rejected because it implements Leopard-RS over $GF(2^{16})$. This generates mathematically distinct parity shreds, **violating Solana's wire format** and preventing consensus across validator versions.
-2. **The Hard-Fork Rabbit Hole:** Recent attempts to introduce `additive-fft-reed-solomon` (AVX-512 GFNI) also require breaking the wire protocol format, requiring an ecosystem-wide feature gate/hard-fork. Furthermore, Agave reconstructs shreds immediately when 32 of 64 shreds arrive, where FFT algorithms lose their asymptotic advantages.
+2. **The Wire Protocol Constraint:** Explorations using `additive-fft-reed-solomon` achieve high performance on x86 with AVX-512 GFNI, but alter the polynomial basis and shred wire representation, requiring network-wide feature gates. In contrast, our implementation maintains 100% bit-exact parity with the canonical Vandermonde layout.
 3. **The ARM64 NEON Blindspot:** Upstream contributors have focused exclusively on x86 AVX-512. ARM64 (AWS Graviton, Apple Silicon, Ampere Altra) has been relegated to generic unvectorized compiler fallback.
 
 ---
